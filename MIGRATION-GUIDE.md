@@ -15,7 +15,7 @@ The C# port maintains API compatibility at the conceptual level while adapting t
 | Language | C99 | C# 12 (.NET 9.0) |
 | Memory Management | Manual (malloc/free) | Automatic (GC) with explicit clearing |
 | Error Handling | errno, return codes | Exceptions |
-| Platform | Linux only | Cross-platform (Linux/macOS/Windows) |
+| Platform | Linux only | Cross-platform (Linux/macOS/Windows 10+) |
 
 ### 2. Cryptographic Libraries
 
@@ -172,10 +172,12 @@ agentcrypt -e SHA256:abc123... myfile.txt
 - SSH agent via Unix domain socket: `/var/folders/*/T/*/agent.*`
 
 ### Windows
-- ✅ Full support
+- ✅ Full support (Windows 10 or later)
 - SSH agent via named pipe: `\\.\pipe\openssh-ssh-agent`
-- Set `SSH_AUTH_SOCK` environment variable to the pipe path
+- Set `SSH_AUTH_SOCK` environment variable to `\\.\pipe\openssh-ssh-agent`
 - Requires OpenSSH Authentication Agent service to be running
+  - Start the service: `Start-Service ssh-agent` (PowerShell as Administrator)
+  - Enable automatic start: `Set-Service -Name ssh-agent -StartupType Automatic`
 
 ## Migration Checklist
 

@@ -4,7 +4,7 @@ This is a cross-platform C#/.NET port of the libagentcrypt library. It provides 
 
 ## Features
 
-- ✅ **Cross-platform**: Full support on Linux, macOS, and Windows via Unix domain sockets and named pipes
+- ✅ **Cross-platform**: Full support on Linux, macOS, and Windows 10+ via Unix domain sockets and named pipes
 - ✅ **Modern .NET**: Built on .NET 9.0
 - ✅ **No external dependencies**: Uses built-in .NET cryptography APIs
 - ✅ **SSH Agent Protocol**: Full implementation of SSH agent communication
@@ -102,12 +102,15 @@ ssh-add ~/.ssh/id_rsa
 Full support via Unix domain sockets. Uses the built-in SSH agent.
 
 ### Windows
-✅ **Full support** via Windows named pipes. Works with the OpenSSH authentication agent service.
+✅ **Full support** (Windows 10 or later) via Windows named pipes. Works with the OpenSSH authentication agent service.
 
 To use on Windows:
 1. Ensure the OpenSSH Authentication Agent service is running:
    ```powershell
+   # Start the service (run PowerShell as Administrator)
    Start-Service ssh-agent
+   
+   # Enable automatic start on boot
    Set-Service -Name ssh-agent -StartupType Automatic
    ```
 2. Add your SSH key:
@@ -116,7 +119,11 @@ To use on Windows:
    ```
 3. Set the `SSH_AUTH_SOCK` environment variable to the Windows named pipe:
    ```powershell
+   # Set for current session
    $env:SSH_AUTH_SOCK = "\\.\pipe\openssh-ssh-agent"
+   
+   # Set permanently for current user
+   [System.Environment]::SetEnvironmentVariable('SSH_AUTH_SOCK', '\\.\pipe\openssh-ssh-agent', 'User')
    ```
 
 Note: On Windows, the library uses named pipes which automatically provide the same functionality as Unix domain sockets on Linux/macOS.
