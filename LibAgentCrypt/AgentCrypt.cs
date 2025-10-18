@@ -24,7 +24,7 @@ namespace LibAgentCrypt;
 /// </summary>
 public class AgentCrypt
 {
-    private const int NonceBytes = 24;
+    private const int NonceBytes = 12;
     private const int KeyBytes = 32;
     private const int MacBytes = 16;
     private const int HashBytes = 32;
