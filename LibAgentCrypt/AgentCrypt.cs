@@ -267,7 +267,7 @@ public class AgentCrypt
         output.Write(encryptedKey, 0, encryptedKey.Length);
 
         // Encrypt file content with ChaCha20-Poly1305 stream
-        var nonce = new byte[12];
+        var nonce = new byte[NonceBytes];
         RandomNumberGenerator.Fill(nonce);
         output.Write(nonce, 0, nonce.Length);
 
@@ -279,15 +279,16 @@ public class AgentCrypt
         
         int bytesRead;
         long counter = 0;
+        var currentNonce = new byte[nonce.Length];
         while ((bytesRead = input.Read(buffer, 0, buffer.Length)) > 0)
         {
-            var currentNonce = new byte[12];
-            Array.Copy(nonce, currentNonce, 12);
-            
-            // Increment counter in nonce
-            for (int i = 0; i < 8; i++)
+            // XOR nonce with current chunk index
+            for (int i = 0; i < nonce.Length; i+=sizeof(long))
             {
-                currentNonce[4 + i] = (byte)(counter >> (i * 8));
+                for (int j = 0; j < sizeof(long) && i+j < nonce.Length; j++)
+                {
+                    currentNonce[i+j] = (byte)(nonce[i] ^ (counter >> j) & 0xFF);
+                }
             }
             
             chacha.Encrypt(currentNonce, buffer.AsSpan(0, bytesRead), 
@@ -354,7 +355,7 @@ public class AgentCrypt
             throw new InvalidDataException("Invalid stream key size");
 
         // Read nonce
-        var nonce = new byte[12];
+        var nonce = new byte[NonceBytes];
         if (input.Read(nonce, 0, 12) != 12)
             throw new InvalidDataException("Failed to read nonce");
 
@@ -364,6 +365,7 @@ public class AgentCrypt
         var buffer = new byte[4096 + MacBytes];
         long counter = 0;
         
+        var currentNonce = new byte[nonce.Length];
         while (true)
         {
             var tag = new byte[MacBytes];
@@ -377,14 +379,14 @@ public class AgentCrypt
             if (bytesRead == 0)
                 throw new InvalidDataException("Unexpected end of file");
 
-            var currentNonce = new byte[12];
-            Array.Copy(nonce, currentNonce, 12);
-            
-            for (int i = 0; i < 8; i++)
+            // XOR nonce with current chunk index
+            for (int i = 0; i < nonce.Length; i += sizeof(long))
             {
-                currentNonce[4 + i] = (byte)(counter >> (i * 8));
+                for (int j = 0; j < sizeof(long) && i + j < nonce.Length; j++)
+                {
+                    currentNonce[i + j] = (byte)(nonce[i] ^ (counter >> j) & 0xFF);
+                }
             }
-            
             var plainBuffer = new byte[bytesRead];
             chacha.Decrypt(currentNonce, buffer.AsSpan(0, bytesRead), tag, plainBuffer);
             
