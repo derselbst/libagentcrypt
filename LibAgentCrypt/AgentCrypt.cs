@@ -30,6 +30,9 @@ public class AgentCrypt
     private const int HashBytes = 32;
     private const int MinPadSize = 16;
 
+    private const byte FileVersion = 0;
+    private static readonly byte[] FileHeader = [ (byte)'A', (byte)'C', (byte)'B', FileVersion ];
+
     /// <summary>
     /// Encrypts a block of data using an SSH agent key.
     /// </summary>
@@ -245,10 +248,7 @@ public class AgentCrypt
         var encryptedKey = Encrypt(streamKey, keySha256, 0, agentPath);
 
         // Write file header: magic + encrypted key size + hash
-        output.WriteByte(0x41); // 'A'
-        output.WriteByte(0x43); // 'C'
-        output.WriteByte(0x42); // 'B'
-        output.WriteByte(0x00); // version
+        output.Write(FileHeader);
 
         var keySizeBytes = BitConverter.GetBytes((ushort)encryptedKey.Length);
         if (BitConverter.IsLittleEndian)
@@ -259,7 +259,7 @@ public class AgentCrypt
         var headerHash = new byte[HashBytes];
         using (var blake2 = new Blake2bHashAlgorithm(HashBytes))
         {
-            blake2.Update(new byte[] { 0x41, 0x43, 0x42, 0x00 });
+            blake2.Update(FileHeader);
             blake2.Update(keySizeBytes);
             headerHash = blake2.Finalize();
         }
