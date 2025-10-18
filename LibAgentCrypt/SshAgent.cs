@@ -15,6 +15,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+using System.IO.Pipes;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
@@ -62,7 +63,7 @@ internal enum SignatureType
 /// </summary>
 internal class SshAgent : IDisposable
 {
-    private Socket? _socket;
+    private Stream? _stream;
     private readonly string _agentPath;
 
     public SshAgent(string? agentPath = null)
@@ -73,17 +74,40 @@ internal class SshAgent : IDisposable
 
     public void Connect()
     {
+        // NamedPipeClientStream automatically handles both:
+        // - Windows named pipes (e.g., \\.\pipe\openssh-ssh-agent)
+        // - Unix domain sockets (e.g., /tmp/ssh-XXX/agent.123)
         if (OperatingSystem.IsWindows())
         {
-            // On Windows, SSH agent typically runs as a named pipe
-            throw new PlatformNotSupportedException(
-                "Windows SSH agent communication is not yet implemented. " +
-                "This would require named pipe support instead of Unix domain sockets.");
-        }
+            // On Windows, the path is typically \\.\pipe\openssh-ssh-agent
+            // Extract the pipe name from the path
+            string pipeName;
+            if (_agentPath.StartsWith(@"\\.\pipe\", StringComparison.OrdinalIgnoreCase))
+            {
+                pipeName = _agentPath.Substring(@"\\.\pipe\".Length);
+            }
+            else if (_agentPath.StartsWith(@"\\?\pipe\", StringComparison.OrdinalIgnoreCase))
+            {
+                pipeName = _agentPath.Substring(@"\\?\pipe\".Length);
+            }
+            else
+            {
+                // Assume it's just the pipe name
+                pipeName = _agentPath;
+            }
 
-        var endpoint = new UnixDomainSocketEndPoint(_agentPath);
-        _socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
-        _socket.Connect(endpoint);
+            var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
+            pipe.Connect();
+            _stream = pipe;
+        }
+        else
+        {
+            // On Unix systems, use the path directly as a Unix domain socket
+            var endpoint = new UnixDomainSocketEndPoint(_agentPath);
+            var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+            socket.Connect(endpoint);
+            _stream = new NetworkStream(socket, ownsSocket: true);
+        }
     }
 
     public List<(byte[] KeyBlob, string Comment)> ListKeys()
@@ -245,12 +269,13 @@ internal class SshAgent : IDisposable
             Array.Reverse(lengthBytes);
         }
 
-        _socket!.Send(lengthBytes);
-        _socket.Send(data);
+        _stream!.Write(lengthBytes);
+        _stream.Write(data);
+        _stream.Flush();
 
         // Read response length
         var responseLengthBytes = new byte[4];
-        var bytesRead = _socket.Receive(responseLengthBytes);
+        var bytesRead = _stream.Read(responseLengthBytes);
         if (bytesRead != 4)
         {
             throw new IOException("Failed to read response length from SSH agent");
@@ -267,7 +292,7 @@ internal class SshAgent : IDisposable
         var totalBytesRead = 0;
         while (totalBytesRead < responseLength)
         {
-            bytesRead = _socket.Receive(responseData, totalBytesRead, (int)(responseLength - totalBytesRead), SocketFlags.None);
+            bytesRead = _stream.Read(responseData, totalBytesRead, (int)(responseLength - totalBytesRead));
             if (bytesRead == 0)
             {
                 throw new IOException("SSH agent connection closed unexpectedly");
@@ -280,7 +305,7 @@ internal class SshAgent : IDisposable
 
     private void EnsureConnected()
     {
-        if (_socket == null || !_socket.Connected)
+        if (_stream == null)
         {
             Connect();
         }
@@ -288,7 +313,7 @@ internal class SshAgent : IDisposable
 
     public void Dispose()
     {
-        _socket?.Dispose();
+        _stream?.Dispose();
     }
 }
 

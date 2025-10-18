@@ -4,13 +4,14 @@ This is a cross-platform C#/.NET port of the libagentcrypt library. It provides 
 
 ## Features
 
-- ✅ **Cross-platform**: Runs on Linux, macOS, and Windows (with appropriate SSH agent support)
+- ✅ **Cross-platform**: Full support on Linux, macOS, and Windows via Unix domain sockets and named pipes
 - ✅ **Modern .NET**: Built on .NET 9.0
 - ✅ **No external dependencies**: Uses built-in .NET cryptography APIs
 - ✅ **SSH Agent Protocol**: Full implementation of SSH agent communication
 - ✅ **RSA and ED25519 support**: Works with both key types
 - ✅ **File and stream encryption**: Encrypt/decrypt files of any size
 - ✅ **Text mode**: Line-by-line encryption for configuration files
+- ✅ **Windows named pipe support**: Native integration with Windows OpenSSH agent
 
 ## Original C Implementation
 
@@ -101,11 +102,24 @@ ssh-add ~/.ssh/id_rsa
 Full support via Unix domain sockets. Uses the built-in SSH agent.
 
 ### Windows
-⚠️ **Note**: Windows SSH agent communication via named pipes is not yet implemented in this port. The current implementation uses Unix domain sockets which are not compatible with Windows' OpenSSH agent.
+✅ **Full support** via Windows named pipes. Works with the OpenSSH authentication agent service.
 
-To use this on Windows, you would need to:
-1. Use WSL2 (Windows Subsystem for Linux) with its SSH agent, or
-2. Contribute a named pipe implementation for Windows SSH agent support
+To use on Windows:
+1. Ensure the OpenSSH Authentication Agent service is running:
+   ```powershell
+   Start-Service ssh-agent
+   Set-Service -Name ssh-agent -StartupType Automatic
+   ```
+2. Add your SSH key:
+   ```powershell
+   ssh-add ~\.ssh\id_rsa
+   ```
+3. Set the `SSH_AUTH_SOCK` environment variable to the Windows named pipe:
+   ```powershell
+   $env:SSH_AUTH_SOCK = "\\.\pipe\openssh-ssh-agent"
+   ```
+
+Note: On Windows, the library uses named pipes which automatically provide the same functionality as Unix domain sockets on Linux/macOS.
 
 ## SSH Key Types
 
@@ -162,7 +176,6 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ## Contributing
 
 Contributions are welcome! Please feel free to submit pull requests for:
-- Windows named pipe support for SSH agent
 - Additional tests
 - Performance improvements
 - Bug fixes
@@ -171,7 +184,7 @@ Contributions are welcome! Please feel free to submit pull requests for:
 
 1. **Cryptography**: Uses .NET APIs instead of libsodium
 2. **Language**: C# instead of C
-3. **Platform**: Partially cross-platform (Windows SSH agent support pending)
+3. **Platform**: Fully cross-platform with native Windows named pipe support
 4. **Memory Management**: Managed by .NET GC with secure clearing where appropriate
 5. **Error Handling**: Uses exceptions instead of errno
 
