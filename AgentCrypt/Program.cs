@@ -206,6 +206,7 @@ class Program
             if (outputFile != "-" && File.Exists(outputFile) && !force)
             {
                 Console.Write($"{outputFile} already exists; do you wish to overwrite (y or n)? ");
+                Console.Out.Flush();
                 var response = Console.ReadLine();
                 if (string.IsNullOrEmpty(response) || !response.StartsWith("y", StringComparison.OrdinalIgnoreCase))
                 {
