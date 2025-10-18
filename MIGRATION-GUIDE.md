@@ -15,9 +15,7 @@ The C# port maintains API compatibility at the conceptual level while adapting t
 | Language | C99 | C# 12 (.NET 9.0) |
 | Memory Management | Manual (malloc/free) | Automatic (GC) with explicit clearing |
 | Error Handling | errno, return codes | Exceptions |
-| Platform | Linux only | Cross-platform (Linux/macOS/Windows*) |
-
-*Windows SSH agent support requires named pipes implementation
+| Platform | Linux only | Cross-platform (Linux/macOS/Windows) |
 
 ### 2. Cryptographic Libraries
 
@@ -114,11 +112,18 @@ strncpy(addr.sun_path, path, sizeof(addr.sun_path)-1);
 connect(fd, (struct sockaddr *)&addr, sizeof(addr));
 ```
 
-#### C# Version (Unix Domain Sockets)
+#### C# Version (Cross-Platform)
 ```csharp
+// On Windows - Named Pipes
+var pipe = new NamedPipeClientStream(".", "openssh-ssh-agent", PipeDirection.InOut);
+pipe.Connect();
+
+// On Linux/macOS - Unix Domain Sockets
 var endpoint = new UnixDomainSocketEndPoint(agentPath);
-_socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
-_socket.Connect(endpoint);
+var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+socket.Connect(endpoint);
+
+// Both wrapped in a common Stream interface
 ```
 
 ### 7. File I/O
@@ -167,10 +172,10 @@ agentcrypt -e SHA256:abc123... myfile.txt
 - SSH agent via Unix domain socket: `/var/folders/*/T/*/agent.*`
 
 ### Windows
-- ⚠️ Partial support
-- Unix domain sockets work on Windows 10+
-- However, Windows OpenSSH agent uses named pipes (`\\.\pipe\openssh-ssh-agent`)
-- **TODO**: Implement named pipe support for Windows SSH agent
+- ✅ Full support
+- SSH agent via named pipe: `\\.\pipe\openssh-ssh-agent`
+- Set `SSH_AUTH_SOCK` environment variable to the pipe path
+- Requires OpenSSH Authentication Agent service to be running
 
 ## Migration Checklist
 
@@ -249,30 +254,25 @@ dotnet test
 
 Potential improvements for the C# port:
 
-1. **Windows SSH Agent Support**
-   - Implement named pipe communication
-   - Detect platform and use appropriate transport
-
-2. **Async/Await Support**
+1. **Async/Await Support**
    - Make encryption/decryption async
    - Better for server scenarios
 
-3. **Streaming API**
+2. **Streaming API**
    - Add `IAsyncEnumerable<byte[]>` support
    - Stream large files without loading into memory
 
-4. **Additional Platforms**
+3. **Additional Platforms**
    - Test on ARM64 Linux
    - Test on macOS ARM (M1/M2)
 
-5. **NuGet Package**
+4. **NuGet Package**
    - Publish LibAgentCrypt as NuGet package
    - Enable easy installation: `dotnet add package LibAgentCrypt`
 
 ## Contributing
 
 Contributions welcome for:
-- Windows named pipe support
 - Performance optimizations
 - Additional tests
 - Documentation improvements
