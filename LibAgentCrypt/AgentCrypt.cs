@@ -86,17 +86,15 @@ public class AgentCrypt
         padBuf[padBufSize - 2] = (byte)(cleartext.Length >> 8);
         padBuf[padBufSize - 1] = (byte)cleartext.Length;
 
-        // Generate nonce
+        // Generate nonce using keyed BLAKE2b
         var randomKey = RandomNumberGenerator.GetBytes(KeyBytes);
-        var nonce = new byte[NonceBytes];
-        using (var blake2 = new Blake2bHashAlgorithm(NonceBytes))
+        byte[] nonce;
+        using (var blake2 = new Blake2bHashAlgorithm(NonceBytes, randomKey))
         {
             blake2.Update(padBuf);
-            var hash = blake2.Finalize();
-            using var hmac = new HMACSHA256(randomKey);
-            var nonceData = hmac.ComputeHash(padBuf);
-            Array.Copy(nonceData, 0, nonce, 0, NonceBytes);
+            nonce = blake2.Finalize();
         }
+        Array.Clear(randomKey, 0, randomKey.Length);
 
         // Compute key hash
         var keyHash = SshAgent.ComputeKeyHash(keyBlob, nonce);

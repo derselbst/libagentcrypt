@@ -42,23 +42,36 @@ internal class Blake2bHashAlgorithm : IDisposable
     private readonly byte[] _buffer = new byte[128];
     private int _bufferLength;
     private readonly int _hashSize;
+    private readonly byte[]? _key;
 
-    public Blake2bHashAlgorithm(int hashSize = 32)
+    public Blake2bHashAlgorithm(int hashSize = 32, byte[]? key = null)
     {
         if (hashSize <= 0 || hashSize > 64)
             throw new ArgumentException("Hash size must be between 1 and 64 bytes", nameof(hashSize));
+        if (key != null && key.Length > 64)
+            throw new ArgumentException("Key size must be between 0 and 64 bytes", nameof(key));
 
         _hashSize = hashSize;
+        _key = key;
         Initialize();
     }
 
     private void Initialize()
     {
         Array.Copy(IV, _h, 8);
-        _h[0] ^= 0x01010000UL ^ (ulong)_hashSize;
+        _h[0] ^= 0x01010000UL ^ ((ulong)(_key?.Length ?? 0) << 8) ^ (ulong)_hashSize;
         _t[0] = _t[1] = 0;
         _f[0] = _f[1] = 0;
         _bufferLength = 0;
+        
+        // If a key is provided, process it as the first block
+        if (_key != null && _key.Length > 0)
+        {
+            var keyBlock = new byte[128];
+            Array.Copy(_key, keyBlock, _key.Length);
+            Update(keyBlock, 0, 128);
+            Array.Clear(keyBlock, 0, 128);
+        }
     }
 
     public void Update(byte[] data)
