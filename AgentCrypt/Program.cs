@@ -46,7 +46,7 @@ class Program
                     if (i + 1 >= args.Length)
                     {
                         Console.Error.WriteLine("Error: -e requires a fingerprint argument");
-                        return 1;
+                        return -1;
                     }
                     keyFingerprint = args[++i];
                     break;
@@ -77,7 +77,7 @@ class Program
                     {
                         Console.Error.WriteLine($"Error: Unknown option {args[i]}");
                         PrintUsage();
-                        return 1;
+                        return -1;
                     }
                     files.Add(args[i]);
                     break;
@@ -88,15 +88,22 @@ class Program
         if (keyFingerprint != null && decrypt)
         {
             Console.Error.WriteLine("Error: specify either -e or -d, not both");
-            return 1;
+            return -1;
         }
 
         // Check SSH_AUTH_SOCK
         var agentPath = Environment.GetEnvironmentVariable("SSH_AUTH_SOCK");
         if (string.IsNullOrEmpty(agentPath))
         {
-            Console.Error.WriteLine("Error: SSH_AUTH_SOCK environment variable not set");
-            return 1;
+            if (OperatingSystem.IsWindows())
+            {
+                agentPath = @"\\.\pipe\openssh-ssh-agent";
+            }
+            else
+            {
+                Console.Error.WriteLine("Error: SSH_AUTH_SOCK environment variable not set");
+                return -1;
+            }
         }
 
         try
@@ -128,7 +135,7 @@ class Program
                 {
                     if (ProcessFile(file, keyFingerprint, decrypt, text, keep, toStdout, force, verbose, agentPath) != 0)
                     {
-                        return 1;
+                        return -1;
                     }
                 }
             }
@@ -136,7 +143,7 @@ class Program
         catch (Exception ex)
         {
             Console.Error.WriteLine($"Error: {ex.Message}");
-            return 1;
+            return -1;
         }
 
         return 0;

@@ -211,7 +211,7 @@ internal class SshAgent : IDisposable
         throw new KeyNotFoundException($"SSH key with fingerprint '{keyFingerprint}' not found in agent");
     }
 
-    public byte[] FindKeyByHash(byte[] nonce, byte[] hash)
+    public byte[] FindKeyByHash(byte[] nonce, byte[] hash, HashAlgorithm hashEngine)
     {
         var keys = ListKeys();
 
@@ -219,7 +219,7 @@ internal class SshAgent : IDisposable
         {
             if (GetKeyType(keyBlob) != KeyType.Unsupported)
             {
-                var computedHash = ComputeKeyHash(keyBlob, nonce);
+                var computedHash = ComputeKeyHash(keyBlob, nonce, hashEngine);
                 if (hash.SequenceEqual(computedHash))
                 {
                     return keyBlob;
@@ -230,12 +230,10 @@ internal class SshAgent : IDisposable
         throw new KeyNotFoundException("SSH key matching the encrypted data not found in agent");
     }
 
-    public static byte[] ComputeKeyHash(byte[] keyBlob, byte[] nonce)
+    public static byte[] ComputeKeyHash(byte[] keyBlob, byte[] nonce, HashAlgorithm hash)
     {
-        using var blake2 = new Blake2bHashAlgorithm(32);
-        blake2.Update(nonce);
-        blake2.Update(keyBlob);
-        return blake2.Finalize();
+        byte[] input = keyBlob.Concat(nonce).ToArray();
+        return hash.ComputeHash(input);
     }
 
     private static KeyType GetKeyType(byte[] keyBlob)

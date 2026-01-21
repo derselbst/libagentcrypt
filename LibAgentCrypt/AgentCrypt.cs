@@ -16,6 +16,7 @@
  */
 
 using System.Security.Cryptography;
+using HASH = System.Security.Cryptography.SHA256;
 
 namespace LibAgentCrypt;
 
@@ -25,10 +26,12 @@ namespace LibAgentCrypt;
 public class AgentCrypt
 {
     private const int NonceBytes = 12;
-    private const int KeyBytes = 32;
+    private const int KeyBytes = HASH.HashSizeInBytes;
     private const int MacBytes = 16;
-    private const int HashBytes = 32;
+    private const int HashBytes = HASH.HashSizeInBytes;
     private const int MinPadSize = 16;
+    private const int ChunkSize = 4 * 1024;
+
 
     private const byte FileVersion = 0;
     private static readonly byte[] FileHeader = [ (byte)'A', (byte)'C', (byte)'B', FileVersion ];
@@ -92,17 +95,18 @@ public class AgentCrypt
         // Generate nonce
         var randomKey = RandomNumberGenerator.GetBytes(KeyBytes);
         var nonce = new byte[NonceBytes];
-        using (var blake2 = new Blake2bHashAlgorithm(NonceBytes))
+        using (var hmac = new HMACSHA256(randomKey))
         {
-            blake2.Update(padBuf);
-            var hash = blake2.Finalize();
-            using var hmac = new HMACSHA256(randomKey);
             var nonceData = hmac.ComputeHash(padBuf);
             Array.Copy(nonceData, 0, nonce, 0, NonceBytes);
         }
 
         // Compute key hash
-        var keyHash = SshAgent.ComputeKeyHash(keyBlob, nonce);
+        byte[] keyHash;
+        using (var sha = HASH.Create())
+        {
+            keyHash = SshAgent.ComputeKeyHash(keyBlob, nonce, HASH.Create());
+        }
 
         // Create challenge (nonce + hash)
         var challenge = new byte[nonce.Length + keyHash.Length];
@@ -115,11 +119,10 @@ public class AgentCrypt
         var signature = agent.Sign(keyBlob, challenge, useLegacy);
 
         // Derive encryption key from signature
-        var encryptionKey = new byte[KeyBytes];
-        using (var blake2 = new Blake2bHashAlgorithm(KeyBytes))
+        byte[] encryptionKey;
+        using (var sha = HASH.Create())
         {
-            blake2.Update(signature);
-            encryptionKey = blake2.Finalize();
+            encryptionKey = sha.ComputeHash(signature);
         }
 
         // Encrypt using ChaCha20-Poly1305
@@ -146,11 +149,15 @@ public class AgentCrypt
     public static byte[] Decrypt(byte[] ciphertext, string? agentPath = null)
     {
         if (ciphertext == null)
+        {
             throw new ArgumentNullException(nameof(ciphertext));
+        }
 
         int minSize = NonceBytes + HashBytes + MacBytes;
         if (ciphertext.Length < minSize)
-            throw new InvalidDataException("Ciphertext too short");
+        {
+            throw new InvalidDataException($"Ciphertext too short! Must be at least {minSize} but was only {ciphertext.Length}");
+        }
 
         var nonce = new byte[NonceBytes];
         var keyHash = new byte[HashBytes];
@@ -160,7 +167,11 @@ public class AgentCrypt
         using var agent = new SshAgent(agentPath);
         agent.Connect();
 
-        var keyBlob = agent.FindKeyByHash(nonce, keyHash);
+        byte[] keyBlob;
+        using (var sha = HASH.Create())
+        {
+            keyBlob = agent.FindKeyByHash(nonce, keyHash, sha);
+        }
 
         // Try to decrypt with both legacy and modern signatures
         byte[] plaintext = null!;
@@ -176,11 +187,10 @@ public class AgentCrypt
 
                 var signature = agent.Sign(keyBlob, challenge, useLegacy);
 
-                var encryptionKey = new byte[KeyBytes];
-                using (var blake2 = new Blake2bHashAlgorithm(KeyBytes))
+                byte[] encryptionKey;
+                using (var sha = HASH.Create())
                 {
-                    blake2.Update(signature);
-                    encryptionKey = blake2.Finalize();
+                    encryptionKey = sha.ComputeHash(signature);
                 }
 
                 var paddedSize = ciphertext.Length - NonceBytes - HashBytes - MacBytes;
@@ -247,33 +257,41 @@ public class AgentCrypt
         // Encrypt the stream key with agent
         var encryptedKey = Encrypt(streamKey, keySha256, 0, agentPath);
 
-        // Write file header: magic + encrypted key size + hash
-        output.Write(FileHeader);
+        var headerToBeWritten = new List<byte>();
+
+        // Write file header: magic
+        headerToBeWritten.AddRange(FileHeader);
 
         var keySizeBytes = BitConverter.GetBytes((ushort)encryptedKey.Length);
         if (BitConverter.IsLittleEndian)
-            Array.Reverse(keySizeBytes);
-        output.Write(keySizeBytes, 0, 2);
-
-        // Write header hash
-        var headerHash = new byte[HashBytes];
-        using (var blake2 = new Blake2bHashAlgorithm(HashBytes))
         {
-            blake2.Update(FileHeader);
-            blake2.Update(keySizeBytes);
-            headerHash = blake2.Finalize();
+            Array.Reverse(keySizeBytes);
         }
-        output.Write(headerHash, 0, headerHash.Length);
-        output.Write(encryptedKey, 0, encryptedKey.Length);
+        // Write file header: size of encrypted key
+        headerToBeWritten.AddRange(keySizeBytes);
+
+        // Compute header hash: SHA256(FileHeader | keySizeBytes);
+        var headerHash = new byte[HashBytes];
+        using (var sha = HASH.Create())
+        {
+            headerHash = sha.ComputeHash(headerToBeWritten.ToArray());
+        }
+        // Write file header: hash
+        headerToBeWritten.AddRange(headerHash);
+        // Write encrypted key
+        headerToBeWritten.AddRange(encryptedKey);
 
         // Encrypt file content with ChaCha20-Poly1305 stream
         var nonce = new byte[12];
         RandomNumberGenerator.Fill(nonce);
-        output.Write(nonce, 0, nonce.Length);
+        headerToBeWritten.AddRange(nonce);
+
+        // Write the header!
+        output.Write(headerToBeWritten.ToArray());
 
         using var chacha = new ChaCha20Poly1305(streamKey);
         
-        var buffer = new byte[4096];
+        var buffer = new byte[ChunkSize];
         var cipherBuffer = new byte[buffer.Length + MacBytes];
         var tag = new byte[MacBytes];
         
@@ -335,13 +353,15 @@ public class AgentCrypt
         // Verify header hash
         var expectedHash = new byte[HashBytes];
         Array.Copy(header, 6, expectedHash, 0, HashBytes);
-        
-        using (var blake2 = new Blake2bHashAlgorithm(HashBytes))
+
+        // Compute header hash: SHA256(FileHeader | keySizeBytes);
+        using (var sha = HASH.Create())
         {
-            blake2.Update(header, 0, 6);
-            var computedHash = blake2.Finalize();
+            var computedHash = sha.ComputeHash(header, 0, 6);
             if (!computedHash.SequenceEqual(expectedHash))
+            {
                 throw new InvalidDataException("Header hash mismatch");
+            }
         }
 
         // Read and decrypt stream key
@@ -361,7 +381,7 @@ public class AgentCrypt
         // Decrypt file content
         using var chacha = new ChaCha20Poly1305(streamKey);
         
-        var buffer = new byte[4096 + MacBytes];
+        var buffer = new byte[ChunkSize + MacBytes];
         long counter = 0;
         
         while (true)
