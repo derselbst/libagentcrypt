@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2019-2022, Nicola Di Lieto <nicola.dilieto@gmail.com>
  * Copyright (c) 2025, Ported to C#/.NET by GitHub Copilot
+ * Copyright (c) 2026, by y3tmo, fixing remaining bugs and nonsense caused by Copilot
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above

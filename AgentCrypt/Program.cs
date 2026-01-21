@@ -1,6 +1,7 @@
 ﻿/*
  * Copyright (c) 2019-2022, Nicola Di Lieto <nicola.dilieto@gmail.com>
  * Copyright (c) 2025, Ported to C#/.NET by GitHub Copilot
+ * Copyright (c) 2026, by y3tmo, fixing remaining bugs and nonsense caused by Copilot
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -26,7 +27,6 @@ class Program
         bool decrypt = false;
         bool force = false;
         bool keep = false;
-        bool text = false;
         bool verbose = false;
         string? keyFingerprint = null;
         var files = new List<string>();
@@ -55,9 +55,6 @@ class Program
                     break;
                 case "-k":
                     keep = true;
-                    break;
-                case "-t":
-                    text = true;
                     break;
                 case "-v":
                     verbose = true;
@@ -121,7 +118,7 @@ class Program
                 }
 
                 return ProcessStream(Console.OpenStandardInput(), Console.OpenStandardOutput(),
-                    keyFingerprint, decrypt, text, verbose, agentPath);
+                    keyFingerprint, decrypt, verbose, agentPath);
             }
             else
             {
@@ -133,7 +130,7 @@ class Program
 
                 foreach (var file in files)
                 {
-                    if (ProcessFile(file, keyFingerprint, decrypt, text, keep, toStdout, force, verbose, agentPath) != 0)
+                    if (ProcessFile(file, keyFingerprint, decrypt, keep, toStdout, force, verbose, agentPath) != 0)
                     {
                         return -1;
                     }
@@ -161,7 +158,6 @@ class Program
         Console.WriteLine("  -f    force overwrite of output files");
         Console.WriteLine("  -h    give this help");
         Console.WriteLine("  -k    keep (don't delete) input files");
-        Console.WriteLine("  -t    encrypt/decrypt line by line, output text");
         Console.WriteLine("  -v    verbose mode");
         Console.WriteLine("  -V    display version number");
         Console.WriteLine();
@@ -170,7 +166,7 @@ class Program
         Console.WriteLine("Report bugs at https://github.com/ndilieto/libagentcrypt/issues");
     }
 
-    static int ProcessFile(string inputFile, string? keyFingerprint, bool decrypt, bool text,
+    static int ProcessFile(string inputFile, string? keyFingerprint, bool decrypt,
         bool keep, bool toStdout, bool force, bool verbose, string agentPath)
     {
         try
@@ -181,7 +177,7 @@ class Program
                 return 1;
             }
 
-            var ext = text ? ".act" : ".acb";
+            var ext = ".acb";
             var hasExt = inputFile.EndsWith(ext, StringComparison.OrdinalIgnoreCase);
 
             if (decrypt && !hasExt)
@@ -221,59 +217,52 @@ class Program
                 }
             }
 
-            if (text)
+            if (verbose)
             {
-                ProcessTextFile(inputFile, outputFile, keyFingerprint, decrypt, verbose, agentPath);
+                Console.Error.WriteLine($"{(decrypt ? "Decrypting" : "Encrypting")} {inputFile} to {outputFile} in binary mode");
             }
-            else
-            {
-                if (verbose)
-                {
-                    Console.Error.WriteLine($"{(decrypt ? "Decrypting" : "Encrypting")} {inputFile} to {outputFile} in binary mode");
-                }
 
-                if (toStdout)
+            if (toStdout)
+            {
+                using var input = File.OpenRead(inputFile);
+                using var output = Console.OpenStandardOutput();
+                if (decrypt)
                 {
-                    using var input = File.OpenRead(inputFile);
-                    using var output = Console.OpenStandardOutput();
-                    if (decrypt)
-                    {
-                        AgentCrypt.DecryptStream(input, output, agentPath);
-                    }
-                    else
-                    {
-                        AgentCrypt.EncryptStream(input, output, keyFingerprint, agentPath);
-                    }
+                    AgentCrypt.DecryptStream(input, output, agentPath);
                 }
                 else
                 {
-                    if (decrypt)
-                    {
-                        AgentCrypt.DecryptFile(inputFile, outputFile, agentPath);
-                    }
-                    else
-                    {
-                        AgentCrypt.EncryptFile(inputFile, outputFile, keyFingerprint, agentPath);
-                    }
+                    AgentCrypt.EncryptStream(input, output, keyFingerprint, agentPath);
+                }
+            }
+            else
+            {
+                if (decrypt)
+                {
+                    AgentCrypt.DecryptFile(inputFile, outputFile, agentPath);
+                }
+                else
+                {
+                    AgentCrypt.EncryptFile(inputFile, outputFile, keyFingerprint, agentPath);
+                }
 
-                    if (!keep)
+                if (!keep)
+                {
+                    if (verbose)
                     {
-                        if (verbose)
-                        {
-                            Console.Error.WriteLine($"Removing {inputFile}");
-                        }
-                        File.Delete(inputFile);
+                        Console.Error.WriteLine($"Removing {inputFile}");
                     }
+                    File.Delete(inputFile);
+                }
 
-                    // Copy file metadata
-                    var fileInfo = new FileInfo(inputFile);
-                    if (fileInfo.Exists)
-                    {
-                        var outputInfo = new FileInfo(outputFile);
-                        outputInfo.CreationTime = fileInfo.CreationTime;
-                        outputInfo.LastWriteTime = fileInfo.LastWriteTime;
-                        outputInfo.LastAccessTime = fileInfo.LastAccessTime;
-                    }
+                // Copy file metadata
+                var fileInfo = new FileInfo(inputFile);
+                if (fileInfo.Exists)
+                {
+                    var outputInfo = new FileInfo(outputFile);
+                    outputInfo.CreationTime = fileInfo.CreationTime;
+                    outputInfo.LastWriteTime = fileInfo.LastWriteTime;
+                    outputInfo.LastAccessTime = fileInfo.LastAccessTime;
                 }
             }
 
@@ -286,84 +275,18 @@ class Program
         }
     }
 
-    static void ProcessTextFile(string inputFile, string outputFile, string? keyFingerprint,
-        bool decrypt, bool verbose, string agentPath)
-    {
-        if (verbose)
-        {
-            Console.Error.WriteLine($"{(decrypt ? "Decrypting" : "Encrypting")} {inputFile} to {outputFile} in text mode");
-        }
-
-        using var input = File.OpenText(inputFile);
-        using var output = outputFile == "-" ? Console.Out : new StreamWriter(outputFile);
-
-        string? line;
-        while ((line = input.ReadLine()) != null)
-        {
-            if (string.IsNullOrWhiteSpace(line))
-            {
-                output.WriteLine();
-                continue;
-            }
-
-            if (decrypt)
-            {
-                var encrypted = AgentCrypt.FromBase64(line);
-                var decrypted = AgentCrypt.Decrypt(encrypted, agentPath);
-                output.WriteLine(Encoding.UTF8.GetString(decrypted));
-            }
-            else
-            {
-                var cleartext = Encoding.UTF8.GetBytes(line);
-                var encrypted = AgentCrypt.Encrypt(cleartext, keyFingerprint, 0, agentPath);
-                output.WriteLine(AgentCrypt.ToBase64(encrypted));
-            }
-        }
-    }
-
     static int ProcessStream(Stream input, Stream output, string? keyFingerprint,
-        bool decrypt, bool text, bool verbose, string agentPath)
+        bool decrypt, bool verbose, string agentPath)
     {
         try
         {
-            if (text)
+            if (decrypt)
             {
-                using var reader = new StreamReader(input);
-                using var writer = new StreamWriter(output);
-
-                string? line;
-                while ((line = reader.ReadLine()) != null)
-                {
-                    if (string.IsNullOrWhiteSpace(line))
-                    {
-                        writer.WriteLine();
-                        continue;
-                    }
-
-                    if (decrypt)
-                    {
-                        var encrypted = AgentCrypt.FromBase64(line);
-                        var decrypted = AgentCrypt.Decrypt(encrypted, agentPath);
-                        writer.WriteLine(Encoding.UTF8.GetString(decrypted));
-                    }
-                    else
-                    {
-                        var cleartext = Encoding.UTF8.GetBytes(line);
-                        var encrypted = AgentCrypt.Encrypt(cleartext, keyFingerprint, 0, agentPath);
-                        writer.WriteLine(AgentCrypt.ToBase64(encrypted));
-                    }
-                }
+                AgentCrypt.DecryptStream(input, output, agentPath);
             }
             else
             {
-                if (decrypt)
-                {
-                    AgentCrypt.DecryptStream(input, output, agentPath);
-                }
-                else
-                {
-                    AgentCrypt.EncryptStream(input, output, keyFingerprint, agentPath);
-                }
+                AgentCrypt.EncryptStream(input, output, keyFingerprint, agentPath);
             }
 
             return 0;

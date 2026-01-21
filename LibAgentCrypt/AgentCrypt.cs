@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2019-2022, Nicola Di Lieto <nicola.dilieto@gmail.com>
  * Copyright (c) 2025, Ported to C#/.NET by GitHub Copilot
+ * Copyright (c) 2026, by y3tmo, fixing remaining bugs and nonsense caused by Copilot
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -413,28 +414,6 @@ public class AgentCrypt
         }
 
         Array.Clear(streamKey, 0, streamKey.Length);
-    }
-
-    /// <summary>
-    /// Encodes binary data to base64 without padding.
-    /// </summary>
-    public static string ToBase64(byte[] data)
-    {
-        return Convert.ToBase64String(data).TrimEnd('=');
-    }
-
-    /// <summary>
-    /// Decodes base64 data (with or without padding).
-    /// </summary>
-    public static byte[] FromBase64(string data)
-    {
-        // Add padding if needed
-        int padding = (4 - (data.Length % 4)) % 4;
-        if (padding > 0)
-        {
-            data = data + new string('=', padding);
-        }
-        return Convert.FromBase64String(data);
     }
 
     /// <summary>
