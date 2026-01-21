@@ -25,7 +25,9 @@ namespace LibAgentCrypt;
 
 internal enum AgentCommand : byte
 {
+    // SSH_AGENTC_REQUEST_IDENTITIES
     RequestIdentities = 11,
+    // SSH_AGENTC_SIGN_REQUEST
     SignRequest = 13
 }
 
@@ -60,7 +62,8 @@ internal enum SignatureType
 }
 
 /// <summary>
-/// Provides communication with the SSH agent for signing operations.
+/// Provides communication with the SSH agent for signing operations by implementing the "SSH Agent Protocol", see
+/// https://www.ietf.org/archive/id/draft-miller-ssh-agent-11.html
 /// </summary>
 internal class SshAgent : IDisposable
 {
@@ -73,6 +76,9 @@ internal class SshAgent : IDisposable
             ?? throw new InvalidOperationException("SSH_AUTH_SOCK environment variable not set");
     }
 
+    /// <summary>
+    /// Connects to the SSH agent via the socket or pipe given by _agentPath.
+    /// </summary>
     public void Connect()
     {
         // NamedPipeClientStream automatically handles both:
@@ -111,6 +117,11 @@ internal class SshAgent : IDisposable
         }
     }
 
+    /// <summary>
+    /// Requests the agent to list all available SSH keys by sending a SSH_AGENTC_REQUEST_IDENTITIES command.
+    /// </summary>
+    /// <returns>Returns a list containing a tuple of public keys + an optional comment identifying the key (typically the name of the key).</returns>
+    /// <exception cref="InvalidDataException"></exception>
     public List<(byte[] KeyBlob, string Comment)> ListKeys()
     {
         EnsureConnected();
@@ -139,6 +150,16 @@ internal class SshAgent : IDisposable
         return keys;
     }
 
+    /// <summary>
+    /// Requests a signing request to the agent, i.e. SSH_AGENTC_SIGN_REQUEST
+    /// </summary>
+    /// <param name="keyBlob">Public ssh key used to identify the key to sign with.</param>
+    /// <param name="data">The data to be signed.</param>
+    /// <param name="useLegacy">If false (the default) the agent will receive an extra flag if the key is an RSA key, asking it to use an SHA256 signature based algorithm.
+    /// If true, this special flag is left unset, assuming the agent does not support it, in which case the agent might use a less secure SHA1- or DSA-based signature.</param>
+    /// <returns></returns>
+    /// <exception cref="NotSupportedException"></exception>
+    /// <exception cref="InvalidDataException"></exception>
     public byte[] Sign(byte[] keyBlob, byte[] data, bool useLegacy = false)
     {
         EnsureConnected();
@@ -172,6 +193,12 @@ internal class SshAgent : IDisposable
         return reply.ReadBlob();
     }
 
+    /// <summary>
+    /// Requests the agent to list available keys and tries to find one that matches the given fingerprint.
+    /// </summary>
+    /// <param name="keyFingerprint">A base64 encoded SHA256 fingerprint, like the ones you get from ssh-add -l</param>
+    /// <returns>The public ssh key matching the fingerprint.</returns>
+    /// <exception cref="KeyNotFoundException"></exception>
     public byte[] FindKeyBySha256(string? keyFingerprint)
     {
         var keys = ListKeys();
@@ -212,7 +239,15 @@ internal class SshAgent : IDisposable
         throw new KeyNotFoundException($"SSH key with fingerprint '{keyFingerprint}' not found in agent");
     }
 
-    public byte[] FindKeyByHash(byte[] nonce, byte[] hash, HashAlgorithm hashEngine)
+    /// <summary>
+    /// Requests the agent to list available keys and tries to find one that matches the expectedHash.
+    /// </summary>
+    /// <param name="nonce">The nonce read from the encrypted file.</param>
+    /// <param name="expectedHash">The expected hash to look for. This hash was originally created by ComputeKeyHash().</param>
+    /// <param name="hashEngine">The hash engine that was used when the encrypted file was written, typically SHA256.</param>
+    /// <returns>A public key identifying the ssh key.</returns>
+    /// <exception cref="KeyNotFoundException"></exception>
+    public byte[] FindKeyByHash(byte[] nonce, byte[] expectedHash, HashAlgorithm hashEngine)
     {
         var keys = ListKeys();
 
@@ -221,7 +256,7 @@ internal class SshAgent : IDisposable
             if (GetKeyType(keyBlob) != KeyType.Unsupported)
             {
                 var computedHash = ComputeKeyHash(keyBlob, nonce, hashEngine);
-                if (hash.SequenceEqual(computedHash))
+                if (expectedHash.SequenceEqual(computedHash))
                 {
                     return keyBlob;
                 }
@@ -231,12 +266,24 @@ internal class SshAgent : IDisposable
         throw new KeyNotFoundException("SSH key matching the encrypted data not found in agent");
     }
 
+    /// <summary>
+    /// Computes a hash for a given ssh key and nonce.
+    /// </summary>
+    /// <param name="keyBlob">The public ssh key.</param>
+    /// <param name="nonce">The random nonce</param>
+    /// <param name="hash">The hash engine to use, typically SHA256.</param>
+    /// <returns>The hash composed of SHA(keyblob + nonce)</returns>
     public static byte[] ComputeKeyHash(byte[] keyBlob, byte[] nonce, HashAlgorithm hash)
     {
         byte[] input = keyBlob.Concat(nonce).ToArray();
         return hash.ComputeHash(input);
     }
 
+    /// <summary>
+    /// Retrieves which cryptographic algorithm is use by a key.
+    /// </summary>
+    /// <param name="keyBlob">The public ssh key</param>
+    /// <returns>An enum identifying the crypto algorithm of the key.</returns>
     private static KeyType GetKeyType(byte[] keyBlob)
     {
         try
@@ -257,6 +304,12 @@ internal class SshAgent : IDisposable
         }
     }
 
+    /// <summary>
+    /// Sends a command to the SSH agent.
+    /// </summary>
+    /// <param name="command"></param>
+    /// <returns></returns>
+    /// <exception cref="IOException"></exception>
     private SshAgentMessage SendCommand(SshAgentMessage command)
     {
         EnsureConnected();

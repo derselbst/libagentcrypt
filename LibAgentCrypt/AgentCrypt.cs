@@ -238,7 +238,7 @@ public class AgentCrypt
     /// </summary>
     /// <param name="inputPath">Path to the input file.</param>
     /// <param name="outputPath">Path to the output file.</param>
-    /// <param name="keySha256">The SHA256 fingerprint of the SSH key (optional).</param>
+    /// <param name="keySha256">The base64 encoded SHA256 fingerprint of the SSH key (optional).</param>
     /// <param name="agentPath">Path to SSH agent socket (uses SSH_AUTH_SOCK if null).</param>
     public static void EncryptFile(string inputPath, string outputPath, string? keySha256 = null, string? agentPath = null)
     {
