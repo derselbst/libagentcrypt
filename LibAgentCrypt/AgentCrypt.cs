@@ -272,8 +272,7 @@ public class AgentCrypt
         using var chacha = new ChaCha20Poly1305(streamKey);
         
         var buffer = new byte[4096];
-        var cipherBuffer = new byte[buffer.Length + MacBytes];
-        var tag = new byte[MacBytes];
+        var chunkBuffer = new byte[buffer.Length + MacBytes]; // tag + ciphertext together
         
         int bytesRead;
         long counter = 0;
@@ -288,11 +287,12 @@ public class AgentCrypt
                 currentNonce[4 + i] = (byte)(counter >> (i * 8));
             }
             
+            // Encrypt: output is ciphertext in chunkBuffer[MacBytes..], tag in chunkBuffer[0..MacBytes]
             chacha.Encrypt(currentNonce, buffer.AsSpan(0, bytesRead), 
-                cipherBuffer.AsSpan(MacBytes, bytesRead), tag);
+                chunkBuffer.AsSpan(MacBytes, bytesRead), chunkBuffer.AsSpan(0, MacBytes));
             
-            output.Write(tag, 0, MacBytes);
-            output.Write(cipherBuffer, MacBytes, bytesRead);
+            // Write tag + ciphertext together as one chunk
+            output.Write(chunkBuffer, 0, MacBytes + bytesRead);
             counter++;
         }
 
@@ -359,21 +359,17 @@ public class AgentCrypt
         // Decrypt file content
         using var chacha = new ChaCha20Poly1305(streamKey);
         
-        var buffer = new byte[4096 + MacBytes];
+        var chunkBuffer = new byte[4096 + MacBytes]; // tag + ciphertext together
         long counter = 0;
         
         while (true)
         {
-            var tag = new byte[MacBytes];
-            var tagBytesRead = input.Read(tag, 0, MacBytes);
-            if (tagBytesRead == 0)
+            // Read chunk (tag + ciphertext together)
+            int chunkBytesRead = input.Read(chunkBuffer, 0, chunkBuffer.Length);
+            if (chunkBytesRead == 0)
                 break;
-            if (tagBytesRead != MacBytes)
-                throw new InvalidDataException("Incomplete tag");
-
-            int bytesRead = input.Read(buffer, 0, buffer.Length);
-            if (bytesRead == 0)
-                throw new InvalidDataException("Unexpected end of file");
+            if (chunkBytesRead < MacBytes)
+                throw new InvalidDataException("Incomplete chunk");
 
             var currentNonce = new byte[12];
             Array.Copy(nonce, currentNonce, 12);
@@ -383,10 +379,15 @@ public class AgentCrypt
                 currentNonce[4 + i] = (byte)(counter >> (i * 8));
             }
             
-            var plainBuffer = new byte[bytesRead];
-            chacha.Decrypt(currentNonce, buffer.AsSpan(0, bytesRead), tag, plainBuffer);
+            // Decrypt: tag is in first MacBytes, ciphertext is the rest
+            var ciphertextLength = chunkBytesRead - MacBytes;
+            var plainBuffer = new byte[ciphertextLength];
+            chacha.Decrypt(currentNonce, 
+                chunkBuffer.AsSpan(MacBytes, ciphertextLength), 
+                chunkBuffer.AsSpan(0, MacBytes), 
+                plainBuffer);
             
-            output.Write(plainBuffer, 0, bytesRead);
+            output.Write(plainBuffer, 0, ciphertextLength);
             counter++;
         }
 
